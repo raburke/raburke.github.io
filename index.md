@@ -1,11 +1,6 @@
-<!doctype html>
-<head>
-  <meta charset="utf-8">
-  <title>RAB</title>
-</head>
-<body>
-  <h1>RAB</h1>
-  <b>Exotic Pair Isomorphism Signatures</b>
-  <a href="https://github.com/raburke/ExoticPairIsoSigs/files/6094084/Exotic.Pair.Isomorphism.Signatures.txt">Exotic Pair Isomorphism Signatures</a>
-</body>
-</html>
+# RAB
+
+## Exotic Pair Isomorphism Signatures:
+The following text file contains a collection of isomorphism signatures for pairs of exotic 4-manifolds as discussed in *paper*. Copy and paste them into *Regina* via New 4-Manifold Triangulation -> From Isomorphism Signature.
+
+[Text file containing isosigs.](https://github.com/raburke/ExoticPairIsoSigs/files/6094084/Exotic.Pair.Isomorphism.Signatures.txt)
