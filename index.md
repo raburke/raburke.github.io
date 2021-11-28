@@ -1,5 +1,12 @@
 # Rhuaidi Antonio Burke
 
+## Diagrams to Graphs and Triangulations (DGT)
+### Download
+DGT is currently available as a command line utility in [*Regina*](regina-normal.github.io/).
+
+### Manual
+The usage manual is available here as a PDF.
+
 ## Exotic Pair Isomorphism Signatures:
 The following text file contains a collection of isomorphism signatures for pairs of exotic 4-manifolds as discussed in *Triangulations of Exotic 4-Manifolds*. Copy and paste them into *Regina* via New 4-Manifold Triangulation -> From Isomorphism Signature.
 
