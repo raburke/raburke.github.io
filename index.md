@@ -2,7 +2,7 @@
 
 ## Diagrams to Graphs and Triangulations (DGT)
 ### Download
-DGT is currently available as a command line utility in [*Regina*](regina-normal.github.io/).
+DGT is currently available as a command line utility in [*Regina*](https://regina-normal.github.io/).
 
 ### Manual
 The usage manual is available [here as a PDF](https://github.com/raburke/raburke.github.io/blob/65dda922645808f666450e1bad3a93b3607c450e/DGT-Usage_Manual-WIP.pdf).
