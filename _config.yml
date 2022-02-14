@@ -1,2 +1,4 @@
 title: Rhuaidi Antonio Burke
 baseurl: /
+markdown: kramdown
+auto_ids: false
