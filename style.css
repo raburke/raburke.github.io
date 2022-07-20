@@ -1,0 +1,31 @@
+* {
+  font-family: century-gothic, sans-serif;
+}
+
+.header {
+	overflow: hidden;
+	padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+.header a {
+	text-decoration: none;
+  color: black;
+}
+
+.header a.active {
+	text-decoration: underline;
+}
+
+.header-nav {
+	float: right;
+  padding-right: 10px;
+}
+
+.header-nav a {
+	margin-left: 10px;
+}
+
+body {
+	padding-left: 10px;
+}
