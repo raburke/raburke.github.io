@@ -5,27 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://use.typekit.net/oov2wcw.css">
 <link rel="stylesheet" href="style.css">
-</head>
-<body>
 
- <style>
-.container {
+<style>
+.container { 
   height: 200px;
   position: relative;
-  border: 3px solid green;
 }
 
-.vertical-center {
+.center {
   margin: 0;
   position: absolute;
   top: 50%;
-  -ms-transform: translateY(-50%);
-  transform: translateY(-50%);
+  left: 50%;
+  -ms-transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%);
 }
 </style>
 
+</head>
+<body>
+
 <div class="container">
-  <div class="vertical-center">
+  <div class="center">
     <p><a href="https://www.raburke.xyz/">Main Site</a></p>
   </div>
 </div> 
