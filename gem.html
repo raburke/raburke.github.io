@@ -1,0 +1,1123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Coloured Graph Builder</title>
+<style>
+  :root { font-family: ui-sans-serif, system-ui, Arial, sans-serif; }
+  body { margin: 0; display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  #toolbar {
+    display: flex; gap: .5rem; align-items: center; padding: .5rem .75rem;
+    border-bottom: 1px solid #ddd; background: #fafafa;
+  }
+  #toolbar button, #toolbar select, #toolbar input[type="checkbox"] { font: inherit; padding: .4rem .6rem; }
+  #wrap { display: grid; grid-template-columns: 1fr 320px; height: 100%; }
+  #canvas { width: 100%; height: 100%; touch-action: none; background: #fff; }
+  #panel { border-left: 1px solid #eee; padding: .75rem; overflow: auto; }
+  #panel h3 { margin: .5rem 0; }
+  table { border-collapse: collapse; font-size: 12px; }
+  td, th { border: 1px solid #ddd; padding: 2px 6px; text-align: center; }
+  .node circle { fill: #fff; stroke: #222; stroke-width: 1.25; }
+  .node.selected circle { stroke: #0b5; stroke-width: 2; }
+  .edge { fill: none; stroke: #666; stroke-width: 1.5; }
+  .edge.selected { stroke-width: 2.25; }
+  .edge-hit {
+  fill: none;
+  stroke: #000;          /* painted stroke so pointer-events work */
+  stroke-width: 14;      /* tolerance ~7px each side */
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;            /* invisible */
+  pointer-events: stroke;/* only react when near the stroke */
+  }
+
+  .handle { cursor: pointer; }
+  .handle circle { fill: #fff; stroke: #0b5; stroke-width: 1.25; }
+  .hint { font-size: 12px; color: #666; }
+
+  dialog#printDialog { border: none; padding: 0; width: min(700px, 90vw); }
+  .modal-card { display: grid; grid-template-rows: auto 1fr auto; gap: .5rem; padding: 1rem; border: 1px solid #ddd; background: #fff; max-height: 80vh; }
+  .modal-actions { display: flex; gap: .5rem; justify-content: flex-end; }
+  #adjText, #edgeText { width: 100%; height: 50vh; resize: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .tabs { display:flex; gap:.5rem; border-bottom:1px solid #eee; }
+  .tab-btn { padding:.35rem .6rem; font-size:12px; border:1px solid #ddd; border-bottom:none; background:#f7f7f7; border-top-left-radius:6px; border-top-right-radius:6px; }
+  .tab-btn.active { background:#fff; font-weight:600; }
+  .tabpanel { display:none; }
+  .tabpanel.active { display:block; }
+
+  dialog::backdrop { background: rgba(0,0,0,.2); }
+
+  /* Colours selector + swatch */
+  .color-controls { display: grid; grid-auto-rows: auto; gap: 4px; align-items: start; margin-left: .5rem; }
+  .color-controls label { font-size: 12px; display: grid; grid-auto-flow: column; align-items: center; gap: .35rem; }
+  #numCols { width: 3.5rem; }
+  .swatch { display: grid; grid-template-columns: repeat(6, 20px); grid-template-rows: 20px auto; column-gap: 10px; row-gap: 4px; justify-content: center; }
+  .swatch .panel { width: 20px; height: 20px; border: 1px solid #999; border-radius: 3px; }
+  .swatch .panel.disabled { display: none; }
+  .swatch .label.disabled { display: none; }
+
+  .swatch .label { font-size: 11px; text-align: center; }
+  :root {
+    --col-0:#1f77b4; --col-1:#ff7f0e; --col-2:#2ca02c;
+    --col-3:#d62728; --col-4:#9467bd; --col-5:#8c564b;
+  }
+  .swatch .panel[data-i="0"]{ background:var(--col-0) }
+  .swatch .panel[data-i="1"]{ background:var(--col-1) }
+  .swatch .panel[data-i="2"]{ background:var(--col-2) }
+  .swatch .panel[data-i="3"]{ background:var(--col-3) }
+  .swatch .panel[data-i="4"]{ background:var(--col-4) }
+  .swatch .panel[data-i="5"]{ background:var(--col-5) }
+
+  /* keep panels in row 1 and labels in row 2 even when some items are hidden */
+  .swatch .panel { grid-row: 1; }
+  .swatch .label { grid-row: 2; }
+
+
+  dialog#colorDialog { border: none; padding: 0; width: min(520px, 92vw); }
+  .color-card { display: grid; grid-template-rows: auto 1fr auto; gap: .75rem; padding: 1rem; border: 1px solid #ddd; background:#fff; max-height: 80vh; }
+  .color-grid { display: grid; grid-template-columns: 110px 1fr auto; gap: .75rem 1rem; align-items: center; }
+  .slider-val { min-width: 3.5ch; text-align: right; font-size: 12px; color: #555; }
+
+  #colorPrev { width: 100px; height: 100px; border: 1px solid #aaa; border-radius: 6px; background: #000; }
+  .color-grid label { font-size: 12px; }
+  .color-grid input[type="range"] { width: 100%; }
+
+  .col-span-2 { grid-column: 2 / span 2; }
+
+  #colorHex { grid-column: 2 / span 2; width: 10em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .modal-actions { display: flex; gap: .5rem; justify-content: flex-end; }
+
+  #layers .layer { display:flex; align-items:center; gap:6px; margin:2px 0; }
+  #layers .sw { width:12px; height:12px; border:1px solid #999; border-radius:2px; }
+  #layers .label { font-size:12px; }
+
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="mode-select" data-mode="select">Select/Drag</button>
+    <button id="mode-add-edge" data-mode="add-edge">Add Edge</button>
+    <button id="delete">Delete</button>
+    <button id="clear">Clear</button>
+    <button id="export">Export JSON</button>
+    <input id="importFile" type="file" accept="application/json" style="display:none" />
+    <button id="importBtn">Import JSON</button>
+
+    <div class="color-controls">
+      <label for="numCols">
+        Number of Colours (<i>dim</i>+ 1)
+        <select id="numCols">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+        </select>
+      </label>
+
+      <div class="swatch" id="colorSwatch" aria-label="Colour swatch">
+        <!-- row 1: six panels -->
+        <div class="panel" data-i="0" title="Colour 0"></div>
+        <div class="panel" data-i="1" title="Colour 1"></div>
+        <div class="panel" data-i="2" title="Colour 2"></div>
+        <div class="panel" data-i="3" title="Colour 3"></div>
+        <div class="panel" data-i="4" title="Colour 4"></div>
+        <div class="panel" data-i="5" title="Colour 5"></div>
+        <!-- row 2: six labels aligned under panels -->
+        <div class="label" data-i="0">0</div>
+        <div class="label" data-i="1">1</div>
+        <div class="label" data-i="2">2</div>
+        <div class="label" data-i="3">3</div>
+        <div class="label" data-i="4">4</div>
+        <div class="label" data-i="5">5</div>
+
+      </div>
+    </div>
+
+
+    <span class="hint" style="margin-left:auto">Double-click empty canvas to add a node. In “Add Edge”, click source then target.<br />Click colour boxes to change colour. Press keys 0 to <i>dim</i> on edges to colour edges.<br />Shift click to select and colour multiple edges.</span>
+
+  </div>
+
+  <div id="wrap">
+    <svg id="canvas" tabindex="0" aria-label="graph editor">
+      <defs>
+      </defs>
+      <g id="edges"></g>
+      <g id="nodes"></g>
+      <g id="handles"></g>
+    </svg>
+
+    <aside id="panel">
+      <h3>Graph</h3>
+      <div id="meta"></div>
+      <button id="printGraphBtn" style="margin-bottom:.5rem">Print Graph</button>
+
+      <h3>Colour Layers</h3>
+      <div id="layers"></div>
+
+
+      <h3>Algorithms</h3>
+<!--       <div>
+        <button id="cyclesBtn" title="Detect cycles">Detect Cycles</button>
+        <div id="algoOut" style="margin-top:.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap"></div>
+      </div> -->
+    </aside>
+  </div>
+  <dialog id="printDialog">
+    <div class="modal-card">
+      <div class="tabs">
+        <button id="tabAdj" class="tab-btn active">Adjacency List</button>
+        <button id="tabEdge" class="tab-btn">Edge List</button>
+      </div>
+
+      <div id="panelAdj" class="tabpanel active">
+        <textarea id="adjText" readonly></textarea>
+      </div>
+      <div id="panelEdge" class="tabpanel">
+        <textarea id="edgeText" readonly></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button id="copyPrint">Copy to Clipboard</button>
+        <button id="closeAdj">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+
+  <dialog id="colorDialog">
+    <div class="color-card">
+      <h3 style="margin:0">Edit Colour <span id="colorIndexLabel"></span></h3>
+      <div class="color-grid">
+        <div id="colorPrev" aria-label="Preview"></div>
+        <div class="col-span-2"></div>
+
+
+        <label for="colorH">Hue</label>
+        <input id="colorH" type="range" min="0" max="360" step="1" value="0" />
+        <span id="colorHVal" class="slider-val">0</span>
+
+        <label for="colorS">Saturation</label>
+        <input id="colorS" type="range" min="0" max="100" step="1" value="100" />
+        <span id="colorSVal" class="slider-val">100%</span>
+
+        <label for="colorL">Lightness</label>
+        <input id="colorL" type="range" min="0" max="100" step="1" value="50" />
+        <span id="colorLVal" class="slider-val">50%</span>
+
+
+        <label for="colorHex">Hex</label>
+        <input id="colorHex" type="text" inputmode="text" spellcheck="false" placeholder="#RRGGBB" pattern="^#?[0-9a-fA-F]{6}$" />
+      </div>
+      <div class="modal-actions">
+        <button id="colorSave">Save</button>
+        <button id="colorCancel">Cancel</button>
+      </div>
+    </div>
+  </dialog>
+
+<script>
+(() => {
+  // ----- State -----
+  const RADIUS = 10;
+  const state = {
+    nodes: [],         // {id, x, y, label}
+    edges: [],         // {id, source, target, anchors: [{x,y}]}
+    mode: 'select',    // 'select' | 'add-edge'
+    selectedNodeId: null,
+    selectedEdgeIds: new Set(),
+    tempEdgeSourceId: null,
+    pendingAnchors: [], // anchors while creating a new edge
+    drag: {
+      active:false, kind:null,
+      nodeId:null, edgeId:null, anchorIndex:null,
+      offsetX:0, offsetY:0,
+      startX:0, startY:0,
+      didDrag:false
+    },
+    nextNodeNum: 0,
+    numCols: 3,
+    colors: ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b'],
+    selectedEdgeIds: new Set(),
+    colorVisibility: [true, true, true, true, true, true],
+  };
+
+
+  // ----- DOM -----
+  const svg = document.getElementById('canvas');
+  const gEdges = document.getElementById('edges');
+  const gNodes = document.getElementById('nodes');
+  const gHandles = document.getElementById('handles');
+  const meta = document.getElementById('meta');
+
+  const printBtn = document.getElementById('printGraphBtn');
+  const printDialog = document.getElementById('printDialog');
+  const adjText = document.getElementById('adjText');
+  const edgeText = document.getElementById('edgeText');         // tabs UI only
+  const tabAdjBtn = document.getElementById('tabAdj');           // tabs UI only
+  const tabEdgeBtn = document.getElementById('tabEdge');         // tabs UI only
+  const panelAdj = document.getElementById('panelAdj');          // tabs UI only
+  const panelEdge = document.getElementById('panelEdge');        // tabs UI only
+  const copyPrintBtn = document.getElementById('copyPrint');     // tabs UI only
+  const copyAdjBtn = document.getElementById('copyAdj');         // legacy single-pane
+  const closeAdjBtn = document.getElementById('closeAdj');
+
+  const algoOut = document.getElementById('algoOut');
+
+  const numColsSel = document.getElementById('numCols');
+  const swatch = document.getElementById('colorSwatch');
+
+    // Colour editor (lazy wiring because dialog may be below <script>)
+  let colorDialog, colorPrev, colorH, colorS, colorL, colorHex, colorSave, colorCancel, colorIndexLabel;
+  let colorDialogWired = false, editingColorIndex = 0;
+  let colorHVal, colorSVal, colorLVal;
+
+  const btns = {
+    select: document.getElementById('mode-select'),
+    addEdge: document.getElementById('mode-add-edge'),
+    del: document.getElementById('delete'),
+    clear: document.getElementById('clear'),
+    export: document.getElementById('export'),
+    importBtn: document.getElementById('importBtn'),
+    importFile: document.getElementById('importFile'),
+    cycles: document.getElementById('cyclesBtn'),
+  };
+
+  const layersDiv = document.getElementById('layers');
+
+
+  // ----- Helpers -----
+  const byId = id => state.nodes.find(n => n.id === id);
+  // const edgeKey = (s,t) => state.directed ? `${s}->${t}` : [s,t].sort().join('--');
+
+  function setMode(mode) {
+    state.mode = mode;
+    state.tempEdgeSourceId = null;
+    highlightToolbar();
+  }
+
+  function highlightToolbar() {
+    [btns.select, btns.addEdge].forEach(b => b.style.outline = '');
+    (state.mode === 'select' ? btns.select : btns.addEdge).style.outline = '2px solid #0b5';
+  }
+
+  function svgPoint(evt) {
+    const pt = svg.createSVGPoint();
+    pt.x = evt.clientX; pt.y = evt.clientY;
+    const ctm = svg.getScreenCTM().inverse();
+    return pt.matrixTransform(ctm);
+  }
+
+  function nextNodeLabel() { return String(state.nextNodeNum++); }
+
+  // ----- B-spline helpers (open uniform, degree up to 3) -----
+  function openUniformKnots(n, p) {
+    // n = number of control points - 1
+    const m = n + p + 1;
+    const U = new Array(m + 1);
+    for (let j = 0; j <= m; j++) {
+      if (j <= p) U[j] = 0;
+      else if (j >= m - p) U[j] = 1;
+      else U[j] = (j - p) / (m - 2 * p);
+    }
+    return U;
+  }
+
+  function findSpan(n, p, t, U) {
+    if (t >= U[n + 1]) return n;            // clamp at end
+    let low = p, high = n + 1, mid = Math.floor((low + high) / 2);
+    while (!(t >= U[mid] && t < U[mid + 1])) {
+      if (t < U[mid]) high = mid;
+      else low = mid;
+      mid = Math.floor((low + high) / 2);
+    }
+    return mid;
+  }
+
+  function deBoor(points, p, U, span, t) {
+    // points: [{x,y}], degree p, knot vector U, span index, parameter t
+    const d = new Array(p + 1);
+    for (let j = 0; j <= p; j++) {
+      const pt = points[span - p + j];
+      d[j] = { x: pt.x, y: pt.y };
+    }
+    for (let r = 1; r <= p; r++) {
+      for (let j = p; j >= r; j--) {
+        const i = span - p + j;
+        const denom = U[i + p - r + 1] - U[i];
+        const alpha = denom !== 0 ? (t - U[i]) / denom : 0;
+        d[j].x = (1 - alpha) * d[j - 1].x + alpha * d[j].x;
+        d[j].y = (1 - alpha) * d[j - 1].y + alpha * d[j].y;
+      }
+    }
+    return d[p];
+  }
+
+  function bsplinePathD(ctrlPts, degree = 3, samplesPerSeg = 12) {
+    const n = ctrlPts.length - 1;
+    if (n < 1) return '';
+    const p = Math.min(degree, n);
+    if (p === 1) {
+      // simple line
+      return `M ${ctrlPts[0].x} ${ctrlPts[0].y} L ${ctrlPts[1].x} ${ctrlPts[1].y}`;
+    }
+    // open uniform knots
+    const U = openUniformKnots(n, p);
+    const segs = Math.max(1, n); // rough count of logical segments
+    const steps = Math.max(8, samplesPerSeg * segs);
+    let d = '';
+    for (let s = 0; s <= steps; s++) {
+      // Parameter in [0,1]; keep last sample exactly at 1
+      const t = s / steps;
+      const span = findSpan(n, p, t, U);
+      const pt = deBoor(ctrlPts, p, U, span, t);
+      d += (s === 0 ? 'M ' : ' L ') + pt.x + ' ' + pt.y;
+    }
+    return d;
+  }
+
+  function activatePrintTab(which) {
+    if (!(tabAdjBtn && tabEdgeBtn && panelAdj && panelEdge)) return;
+    const adj = which === 'adj';
+    tabAdjBtn.classList.toggle('active', adj);
+    panelAdj.classList.toggle('active', adj);
+    tabEdgeBtn.classList.toggle('active', !adj);
+    panelEdge.classList.toggle('active', !adj);
+  }
+
+
+  // Build undirected multigraph adjacency list, edge-wise (duplicates kept)
+  function buildAdjListEdgewise() {
+    const ids = state.nodes.map(n => n.id);
+    const adj = new Map(ids.map(id => [id, []])); // id -> [{nbrId, color}]
+    for (const e of state.edges) {
+      if (e.source === e.target) continue; // loops disallowed
+      const c = Number.isInteger(e.color) ? e.color : '?';
+      adj.get(e.source).push({ nbrId: e.target, color: c });
+      adj.get(e.target).push({ nbrId: e.source, color: c });
+    }
+    return adj;
+  }
+
+  // Format like: "u: (v, 2), (w, 0)"
+  function formatAdjListText() {
+    const adj = buildAdjListEdgewise();
+    const lines = [];
+    for (const n of state.nodes) {
+      const entries = adj.get(n.id)
+        .map(({nbrId, color}) => {
+          const lbl = byId(nbrId)?.label ?? '?';
+          return `(${lbl}, ${color})`;
+        })
+        .sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
+      lines.push(`${n.label}: ${entries.join(', ')}`);
+    }
+    return lines.join('\n');
+  }
+
+
+  // Edge list: "(u,v,c),(u2,v2,c2),..."
+  function formatEdgeListText() {
+    const labelOf = (id) => byId(id)?.label ?? '?';
+    const parts = [];
+    for (const e of state.edges) {
+      if (e.source === e.target) continue; // loops disallowed
+      const u = labelOf(e.source), v = labelOf(e.target);
+      const c = Number.isInteger(e.color) ? e.color : '?';
+      parts.push(`(${u},${v},${c})`);
+    }
+    return parts.join(',');
+  }
+
+
+  function renderColorUI() {
+    if (!swatch) return;
+    for (let i = 0; i < 6; i++) {
+      const panel = swatch.querySelector(`.panel[data-i="${i}"]`);
+      const label = swatch.querySelector(`.label[data-i="${i}"]`);
+      const inactive = i >= state.numCols;
+      if (panel) panel.classList.toggle('disabled', inactive);
+      if (label) label.classList.toggle('disabled', inactive);
+    }
+    if (numColsSel && String(numColsSel.value) !== String(state.numCols)) {
+      numColsSel.value = String(state.numCols);
+    }
+  }
+
+
+  // --- Colour helpers ---
+  function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
+
+  function hexToRgb(hex) {
+    const m = String(hex).trim().replace(/^#/,'').match(/^[0-9a-fA-F]{6}$/);
+    if (!m) return null;
+    const n = parseInt(m[0], 16);
+    return { r: (n>>16)&255, g: (n>>8)&255, b: n&255 };
+    }
+  function rgbToHex(r,g,b){
+    const n = (clamp(r,0,255)<<16) | (clamp(g,0,255)<<8) | clamp(b,0,255);
+    return '#' + n.toString(16).padStart(6,'0');
+  }
+  function rgbToHsl(r,g,b){
+    r/=255; g/=255; b/=255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    let h,s,l=(max+min)/2;
+    if(max===min){ h=0; s=0; }
+    else{
+      const d=max-min;
+      s=l>0.5? d/(2-max-min) : d/(max+min);
+      switch(max){
+        case r: h=(g-b)/d + (g<b?6:0); break;
+        case g: h=(b-r)/d + 2; break;
+        case b: h=(r-g)/d + 4; break;
+      }
+      h*=60;
+    }
+    return { h, s:s*100, l:l*100 };
+  }
+  function hslToRgb(h,s,l){
+    h = ((h%360)+360)%360; s/=100; l/=100;
+    const c = (1 - Math.abs(2*l - 1)) * s;
+    const x = c * (1 - Math.abs(((h/60)%2) - 1));
+    const m = l - c/2;
+    let r=0,g=0,b=0;
+    if (0<=h && h<60){ r=c; g=x; b=0; }
+    else if (60<=h && h<120){ r=x; g=c; b=0; }
+    else if (120<=h && h<180){ r=0; g=c; b=x; }
+    else if (180<=h && h<240){ r=0; g=x; b=c; }
+    else if (240<=h && h<300){ r=x; g=0; b=c; }
+    else { r=c; g=0; b=x; }
+    return { r:Math.round((r+m)*255), g:Math.round((g+m)*255), b:Math.round((b+m)*255) };
+  }
+  function hslToHex(h,s,l){ const {r,g,b}=hslToRgb(h,s,l); return rgbToHex(r,g,b); }
+  function hexToHsl(hex){ const rgb=hexToRgb(hex); if(!rgb) return null; return rgbToHsl(rgb.r,rgb.g,rgb.b); }
+
+  function applyColorsToCSS(){
+    // Sync :root CSS variables from state.colors
+    const root = document.documentElement;
+    for (let i=0;i<6;i++){
+      const hex = state.colors[i] || '#000000';
+      root.style.setProperty(`--col-${i}`, hex);
+    }
+  }
+
+
+  function renderLayersUI() {
+    if (!layersDiv) return;
+
+    // colours to show: all active (0..numCols-1) plus any used by edges (legacy)
+    const show = new Set(Array.from({length: state.numCols}, (_,i)=>i));
+    for (const e of state.edges) if (Number.isInteger(e.color)) show.add(e.color);
+
+    // build list
+    const items = [];
+    for (const i of Array.from(show).sort((a,b)=>a-b)) {
+      const checked = !!state.colorVisibility[i];
+      const hex = state.colors[i] || '#000000';
+      items.push(
+        `<label class="layer">
+           <input type="checkbox" class="layer-vis" data-i="${i}" ${checked?'checked':''}>
+           <span class="sw" style="background:${hex}"></span>
+           <span class="label">Colour ${i}</span>
+         </label>`
+      );
+    }
+    layersDiv.innerHTML = items.join('');
+
+    // wire checkboxes
+    layersDiv.querySelectorAll('.layer-vis').forEach(cb => {
+      cb.addEventListener('change', (ev) => {
+        const i = +ev.currentTarget.dataset.i;
+        state.colorVisibility[i] = ev.currentTarget.checked;
+        render();
+        saveLocal();
+      });
+    });
+  }
+
+
+  // ----- Rendering -----
+  function render() {
+  // ----- Edges (as B-spline paths + invisible hit stroke) -----
+  gEdges.innerHTML = '';
+  for (const e of state.edges) {
+    const s = byId(e.source), t = byId(e.target);
+    if (!s || !t) continue;
+
+    const ctrl = [{ x: s.x, y: s.y }, ...(e.anchors || []), { x: t.x, y: t.y }];
+    const d = bsplinePathD(ctrl, 3, 12);
+
+    const isSelected = (state.selectedEdgeIds instanceof Set)
+      ? state.selectedEdgeIds.has(e.id)
+      : (state.selectedEdgeId === e.id);
+
+    const onEdgeDown = (evt) => {
+      evt.stopPropagation();
+      if (!(state.selectedEdgeIds instanceof Set)) state.selectedEdgeIds = new Set();
+
+      if (evt.shiftKey) {
+        if (state.selectedEdgeIds.has(e.id)) state.selectedEdgeIds.delete(e.id);
+        else state.selectedEdgeIds.add(e.id);
+      } else {
+        state.selectedEdgeIds = new Set([e.id]);
+      }
+      state.selectedNodeId = null;
+      render();
+    };
+
+    // visible edge
+    const vis = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    vis.setAttribute('class', `edge${isSelected ? ' selected' : ''}`);
+    vis.setAttribute('d', d);
+    vis.dataset.edgeId = e.id;
+
+    // colour stroke from palette
+    const ci = e.color;
+    if (Number.isInteger(ci) && ci >= 0 && ci < state.colors.length) {
+      vis.style.stroke = state.colors[ci];
+    } else {
+      vis.style.stroke = ''; // fallback to CSS
+    }
+
+    // per-colour visibility
+    const hide = Number.isInteger(ci) && ci >= 0 && ci < state.colorVisibility.length && !state.colorVisibility[ci];
+    vis.style.display = hide ? 'none' : '';
+
+    vis.addEventListener('pointerdown', onEdgeDown);
+    gEdges.appendChild(vis);
+
+    // invisible fat hit path (for easier selection)
+    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    hit.setAttribute('class', 'edge-hit');
+    hit.setAttribute('d', d);
+    hit.dataset.edgeId = e.id;
+    hit.style.display = hide ? 'none' : '';
+    hit.addEventListener('pointerdown', onEdgeDown);
+    gEdges.appendChild(hit);
+  }
+
+  // ----- Anchor handles (only if exactly one edge selected) -----
+  gHandles.innerHTML = '';
+  let singleEdgeId = null;
+  if (state.selectedEdgeIds instanceof Set) {
+    if (state.selectedEdgeIds.size === 1) {
+      singleEdgeId = state.selectedEdgeIds.values().next().value;
+    }
+  } else if (state.selectedEdgeId) {
+    singleEdgeId = state.selectedEdgeId; // legacy fallback
+  }
+  if (singleEdgeId) {
+    const e = state.edges.find(x => x.id === singleEdgeId);
+    if (e && e.anchors && e.anchors.length) {
+      e.anchors.forEach((pt, i) => {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('class', 'handle');
+        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        c.setAttribute('cx', pt.x);
+        c.setAttribute('cy', pt.y);
+        c.setAttribute('r', 6);
+        c.dataset.edgeId = e.id;
+        c.dataset.anchorIndex = String(i);
+        c.addEventListener('pointerdown', onHandlePointerDown);
+        g.appendChild(c);
+        gHandles.appendChild(g);
+      });
+    }
+  }
+
+  // ----- Nodes -----
+  gNodes.innerHTML = '';
+  for (const n of state.nodes) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', `node${n.id === state.selectedNodeId ? ' selected' : ''}`);
+    g.setAttribute('transform', `translate(${n.x},${n.y})`);
+    g.dataset.nodeId = n.id;
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('r', RADIUS);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('dominant-baseline', 'central');
+    label.setAttribute('font-size', '13');
+    label.textContent = n.label;
+
+    g.appendChild(circle);
+    g.appendChild(label);
+
+    g.addEventListener('pointerdown', onNodePointerDown);
+    g.addEventListener('click', onNodeClick);
+    gNodes.appendChild(g);
+  }
+
+  // ----- Side UI + persistence -----
+  updatePanel();
+  renderColorUI();
+  renderLayersUI?.();
+  saveLocal();
+}
+
+
+  function lineBetweenNodes(a, b, r) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = dx/len, ny = dy/len;
+    return {
+      x1: a.x + nx*r, y1: a.y + ny*r,
+      x2: b.x - nx*r, y2: b.y - ny*r
+    };
+  }
+
+  function updatePanel() {
+    const n = state.nodes.length, m = state.edges.length;
+    meta.textContent = `${n} nodes, ${m} edges`;
+  }
+
+
+  // ----- Algorithms -----
+
+  function detectCycles() {
+    const ids = state.nodes.map(n=>n.id);
+    const adj = new Map(ids.map(id => [id, []]));
+    for (const e of state.edges) {
+      adj.get(e.source).push(e.target);
+      adj.get(e.target).push(e.source);
+    }
+    const seen = new Set(), stack = new Set();
+    function dfs(v, parent=null) {
+      seen.add(v); stack.add(v);
+      for (const w of adj.get(v)) {
+        if (w===parent) continue;
+        if (!seen.has(w)) { if (dfs(w, v)) return true; }
+        else if (stack.has(w)) return true;
+      }
+      stack.delete(v);
+      return false;
+    }
+    for (const v of ids) if (!seen.has(v) && dfs(v)) return true;
+    return false;
+  }
+
+  // ----- Events -----
+  // Double-click empty canvas to add a node
+  svg.addEventListener('dblclick', evt => {
+    // Ignore if dbl-click on an existing node or edge
+    if (evt.target.closest('.node, .edge')) return;
+    const {x, y} = svgPoint(evt);
+    const node = { id: crypto.randomUUID(), x, y, label: nextNodeLabel() };
+    state.nodes.push(node);
+    state.selectedNodeId = node.id;
+    render();
+  });
+
+  function onNodeClick(evt) {
+    if (state.drag.didDrag) { state.drag.didDrag = false; return; }
+    const gid = evt.currentTarget.dataset.nodeId;
+    if (state.mode === 'add-edge') {
+      if (!state.tempEdgeSourceId) {
+        state.tempEdgeSourceId = gid;
+        state.selectedNodeId = gid;
+      } else if (state.tempEdgeSourceId && state.tempEdgeSourceId !== gid) {
+        const e = {
+          id: crypto.randomUUID(),
+          source: state.tempEdgeSourceId,
+          target: gid,
+          anchors: state.pendingAnchors.slice(),
+          color: null
+      };
+      state.edges.push(e);
+      state.selectedEdgeIds = new Set([e.id]);
+      state.pendingAnchors = [];
+
+        state.tempEdgeSourceId = null;
+        state.selectedNodeId = null;
+      }
+      render();
+      return;
+    }
+    // select in normal mode
+    state.selectedNodeId = gid;
+    state.selectedEdgeIds.clear();
+    render();
+  }
+
+  function onHandlePointerDown(evt) {
+    evt.preventDefault();
+    const edgeId = evt.currentTarget.dataset.edgeId;
+    const anchorIndex = +evt.currentTarget.dataset.anchorIndex;
+    const e = state.edges.find(x => x.id === edgeId);
+    if (!e) return;
+    const p = svgPoint(evt);
+    const a = e.anchors[anchorIndex];
+    state.drag.active = true;
+    state.drag.kind = 'anchor';
+    state.drag.edgeId = edgeId;
+    state.drag.anchorIndex = anchorIndex;
+    state.drag.offsetX = a.x - p.x;
+    state.drag.offsetY = a.y - p.y;
+    svg.setPointerCapture(evt.pointerId);
+  }
+
+  function onNodePointerDown(evt) {
+    evt.preventDefault();
+    const gid = evt.currentTarget.dataset.nodeId;
+    const node = byId(gid);
+    const p = svgPoint(evt);
+    state.drag.active = true;
+    state.drag.kind = 'node';
+    state.drag.nodeId = gid;
+    state.drag.offsetX = node.x - p.x;
+    state.drag.offsetY = node.y - p.y;
+    state.drag.startX = p.x;
+    state.drag.startY = p.y;
+    state.drag.didDrag = false;
+    svg.setPointerCapture(evt.pointerId);
+    state.selectedNodeId = gid;
+    state.selectedEdgeIds.clear();
+    state.selectedEdgeId = null;
+    render();
+  }
+
+
+  svg.addEventListener('pointermove', evt => {
+    if (!state.drag.active) return;
+    const p = svgPoint(evt);
+    if (state.drag.kind === 'node') {
+      const node = byId(state.drag.nodeId);
+      node.x = p.x + state.drag.offsetX;
+      node.y = p.y + state.drag.offsetY;
+      const dx = p.x - state.drag.startX, dy = p.y - state.drag.startY;
+      if (!state.drag.didDrag && (dx*dx + dy*dy) > 9) state.drag.didDrag = true; // >3px
+    } else if (state.drag.kind === 'anchor') {
+      const e = state.edges.find(x => x.id === state.drag.edgeId);
+      if (e) {
+        const idx = state.drag.anchorIndex;
+        e.anchors[idx].x = p.x + state.drag.offsetX;
+        e.anchors[idx].y = p.y + state.drag.offsetY;
+      }
+    }
+    render();
+  });
+
+  svg.addEventListener('pointerup', evt => {
+    if (!state.drag.active) return;
+    state.drag.active = false;
+    state.drag.kind = null;
+    state.drag.nodeId = null;
+    state.drag.edgeId = null;
+    state.drag.anchorIndex = null;
+    state.drag.startX = 0;
+    state.drag.startY = 0;
+    state.drag.didDrag = false;
+    svg.releasePointerCapture(evt.pointerId);
+    saveLocal();
+  });
+
+
+  // While adding an edge: click on empty canvas to add anchor points
+  svg.addEventListener('click', evt => {
+    if (state.mode !== 'add-edge') return;
+    if (!state.tempEdgeSourceId) return;
+    if (evt.target.closest('.node, .edge, .handle')) return;
+    const {x, y} = svgPoint(evt);
+    state.pendingAnchors.push({x, y});
+    render();
+  });
+
+
+  // Keyboard listener
+  svg.addEventListener('keydown', evt => {
+    if (evt.key === 'Delete' || evt.key === 'Backspace') { doDelete(); return; }
+
+    // Selection Set that works for single- or multi-select code
+    const selected =
+      state.selectedEdgeIds instanceof Set ? state.selectedEdgeIds :
+      (state.selectedEdgeId ? new Set([state.selectedEdgeId]) : new Set());
+
+    if (selected.size === 0) return;
+
+    let digit = null;
+    if (/^[0-5]$/.test(evt.key)) digit = +evt.key;
+    else if (/^Numpad[0-5]$/.test(evt.code)) digit = +evt.code.slice(6);
+    if (digit == null) return;
+
+    // ignore inactive colours
+    if (digit >= state.numCols) { evt.preventDefault(); return; }
+
+    let changed = false;
+    for (const e of state.edges) {
+      if (selected.has(e.id)) { e.color = digit; changed = true; }
+    }
+    if (changed) { render(); saveLocal(); evt.preventDefault(); }
+  });
+
+
+
+  // Toolbar
+  btns.select.addEventListener('click', () => setMode('select'));
+  btns.addEdge.addEventListener('click', () => setMode('add-edge'));
+  btns.del.addEventListener('click', doDelete);
+  btns.clear.addEventListener('click', () => {
+    if (!confirm('Clear graph?')) return;
+    Object.assign(state, {
+      nodes: [], edges: [], selectedNodeId: null, selectedEdgeIds: new Set(),
+      tempEdgeSourceId: null, nextNodeNum: 0, pendingAnchors: []
+    });
+    render();
+  });
+  btns.export.addEventListener('click', () => {
+    const data = JSON.stringify({ nodes: state.nodes, edges: state.edges }, null, 2);
+    const blob = new Blob([data], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'graph.json'; a.click();
+    URL.revokeObjectURL(url);
+  });
+  btns.importBtn.addEventListener('click', () => btns.importFile.click());
+  btns.importFile.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const obj = JSON.parse(text);
+      if (!obj.nodes || !obj.edges) throw new Error('Invalid JSON');
+      state.nodes = obj.nodes;
+      state.edges = obj.edges;
+      // normalise anchors for backward-compat
+      state.edges.forEach(e => {
+        if (!Array.isArray(e.anchors)) e.anchors = [];
+        if (!Number.isInteger(e.color)) e.color = null;
+      });
+
+      const nums = state.nodes.map(n => Number(n.label)).filter(Number.isFinite);
+      const maxLabelNum = nums.length ? Math.max(...nums) : -1;
+      state.nextNodeNum = maxLabelNum + 1; // 0 if no nodes
+
+      render();
+    } catch (err) { alert('Import failed: ' + err.message); }
+  });
+
+  if (btns.cycles && algoOut) {
+    btns.cycles.addEventListener('click', () => {
+      algoOut.textContent = detectCycles() ? 'Cycle exists' : 'No cycles';
+    });
+  }
+
+
+  function doDelete() {
+    if (state.selectedNodeId) {
+      state.edges = state.edges.filter(e => e.source !== state.selectedNodeId && e.target !== state.selectedNodeId);
+      state.nodes = state.nodes.filter(n => n.id !== state.selectedNodeId);
+      state.selectedNodeId = null;
+    } else if (state.selectedEdgeIds && state.selectedEdgeIds.size) {
+      state.edges = state.edges.filter(e => !state.selectedEdgeIds.has(e.id));
+      state.selectedEdgeIds.clear();
+    }
+    render();
+  }
+
+  // Print Graph modal
+  printBtn.addEventListener('click', () => {
+    if (adjText)  adjText.value  = formatAdjListText();
+    if (edgeText) edgeText.value = (typeof formatEdgeListText === 'function') ? formatEdgeListText() : '';
+    activatePrintTab('adj'); // does nothing if tabs not present
+    if (typeof printDialog.showModal === 'function') printDialog.showModal();
+    else printDialog.setAttribute('open', ''); // fallback
+  });
+
+  // Tabs (only if present)
+  if (tabAdjBtn && tabEdgeBtn) {
+    tabAdjBtn.addEventListener('click', () => activatePrintTab('adj'));
+    tabEdgeBtn.addEventListener('click', () => activatePrintTab('edge'));
+  }
+
+  // Copy button: prefer tabbed copy, else legacy single-pane
+  if (copyPrintBtn) {
+    copyPrintBtn.addEventListener('click', async () => {
+      const ta = (panelEdge && panelEdge.classList.contains('active') && edgeText) ? edgeText : adjText;
+      if (!ta) return;
+      try {
+        await navigator.clipboard.writeText(ta.value);
+        copyPrintBtn.textContent = 'Copied';
+        setTimeout(() => { copyPrintBtn.textContent = 'Copy to Clipboard'; }, 900);
+      } catch {
+        ta.select();
+        document.execCommand?.('copy');
+      }
+    });
+  } else if (copyAdjBtn) {
+    copyAdjBtn.addEventListener('click', async () => {
+      if (!adjText) return;
+      try {
+        await navigator.clipboard.writeText(adjText.value);
+        copyAdjBtn.textContent = 'Copied';
+        setTimeout(() => { copyAdjBtn.textContent = 'Copy to Clipboard'; }, 900);
+      } catch {
+        adjText.select();
+        document.execCommand?.('copy');
+      }
+    });
+  }
+
+  // Close works for both UIs
+  closeAdjBtn?.addEventListener('click', () => {
+    printDialog.close?.();
+    printDialog.removeAttribute('open');
+  });
+
+
+  numColsSel.addEventListener('change', () => {
+    state.numCols = Math.max(1, Math.min(6, (+numColsSel.value || 1)));
+    renderColorUI();
+    saveLocal();
+  });
+
+  swatch.addEventListener('click', (evt) => {
+    const panel = evt.target.closest('.panel');
+    if (!panel) return;
+    const i = +panel.dataset.i;
+    if (!(i >= 0 && i < 6)) return;
+    openColorDialog(i);
+  });
+
+  function wireColorDialogIfNeeded(){
+    if (colorDialogWired) return;
+    colorDialog = document.getElementById('colorDialog');
+    colorPrev   = document.getElementById('colorPrev');
+    colorH      = document.getElementById('colorH');
+    colorS      = document.getElementById('colorS');
+    colorL      = document.getElementById('colorL');
+    colorHex    = document.getElementById('colorHex');
+    colorSave   = document.getElementById('colorSave');
+    colorCancel = document.getElementById('colorCancel');
+    colorIndexLabel = document.getElementById('colorIndexLabel');
+    colorHVal = document.getElementById('colorHVal');
+    colorSVal = document.getElementById('colorSVal');
+    colorLVal = document.getElementById('colorLVal');
+
+    const updateFromHSL = () => {
+      const h = +colorH.value, s = +colorS.value, l = +colorL.value;
+      const hex = hslToHex(h,s,l);
+      colorHex.value = hex;
+      colorPrev.style.background = hex;
+      colorHVal.textContent = String(Math.round(+colorH.value));
+      colorSVal.textContent = `${Math.round(+colorS.value)}%`;
+      colorLVal.textContent = `${Math.round(+colorL.value)}%`;
+    };
+    const updateFromHex = () => {
+      const hex = colorHex.value.trim().replace(/^#/,'#').toLowerCase();
+      const hsl = hexToHsl(hex);
+      if (!hsl) return; // ignore invalid
+      colorH.value = Math.round(hsl.h);
+      colorS.value = Math.round(hsl.s);
+      colorL.value = Math.round(hsl.l);
+      colorPrev.style.background = hex;
+      colorHVal.textContent = String(Math.round(+colorH.value));
+      colorSVal.textContent = `${Math.round(+colorS.value)}%`;
+      colorLVal.textContent = `${Math.round(+colorL.value)}%`;
+    };
+
+    colorH.addEventListener('input', updateFromHSL);
+    colorS.addEventListener('input', updateFromHSL);
+    colorL.addEventListener('input', updateFromHSL);
+    colorHex.addEventListener('input', updateFromHex);
+
+    colorSave.addEventListener('click', () => {
+      const hex = colorHex.value.trim().replace(/^#/,'#').toLowerCase();
+      // basic validation
+      if (!/^#[0-9a-f]{6}$/i.test(hex)) { alert('Enter a valid 6-digit hex colour'); return; }
+      state.colors[editingColorIndex] = hex;
+      applyColorsToCSS();
+      renderColorUI();
+      saveLocal();
+      colorDialog.close?.();
+      colorDialog.removeAttribute('open');
+    });
+
+    colorCancel.addEventListener('click', () => {
+      colorDialog.close?.();
+      colorDialog.removeAttribute('open');
+    });
+
+    colorDialogWired = true;
+  }
+
+  function openColorDialog(i){
+    wireColorDialogIfNeeded();
+    editingColorIndex = i;
+    colorIndexLabel.textContent = String(i);
+    const hex = (state.colors[i] || '#000000').toLowerCase();
+    const hsl = hexToHsl(hex) || {h:0,s:100,l:50};
+    colorH.value = Math.round(hsl.h);
+    colorS.value = Math.round(hsl.s);
+    colorL.value = Math.round(hsl.l);
+    colorHex.value = hex;
+    colorPrev.style.background = hex;
+    // set live labels without calling inner-scoped function
+    colorHVal.textContent = String(Math.round(+colorH.value));
+    colorSVal.textContent = `${Math.round(+colorS.value)}%`;
+    colorLVal.textContent = `${Math.round(+colorL.value)}%`;
+
+    if (typeof colorDialog.showModal === 'function') colorDialog.showModal();
+    else colorDialog.setAttribute('open','');
+  }
+
+
+  // ----- Persistence -----
+  const LS_KEY = 'graph-builder-v1';
+  function saveLocal() {
+    const payload = {
+      nodes: state.nodes,
+      edges: state.edges,
+      nextNodeNum: state.nextNodeNum,
+      numCols: state.numCols,
+      colors: state.colors,
+      colorVisibility: state.colorVisibility
+    };
+
+    localStorage.setItem(LS_KEY, JSON.stringify(payload));
+  }
+
+
+  function loadLocal() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      state.nodes = Array.isArray(obj.nodes) ? obj.nodes : [];
+      state.edges = Array.isArray(obj.edges) ? obj.edges : [];
+      state.edges.forEach(e => { if (!Array.isArray(e.anchors)) e.anchors = []; });
+      if (Number.isFinite(obj.nextNodeNum)) {
+        state.nextNodeNum = obj.nextNodeNum;
+      } else {
+        const nums = state.nodes.map(n => Number(n.label)).filter(Number.isFinite);
+        const maxLabelNum = nums.length ? Math.max(...nums) : -1;
+        state.nextNodeNum = maxLabelNum + 1; // 0 if no nodes
+      }
+
+      state.numCols = obj.numCols ? Math.max(1, Math.min(6, obj.numCols)) : 3;
+      state.colors = Array.isArray(obj.colors) && obj.colors.length
+        ? obj.colors.slice(0,6).map(x => /^#[0-9a-fA-F]{6}$/.test(x) ? x.toLowerCase() : '#000000')
+        : ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b'];
+      state.colorVisibility = Array.isArray(obj.colorVisibility)
+        ? Array.from({length:6}, (_,i)=> obj.colorVisibility[i] !== false) // default true
+        : [true, true, true, true, true, true];
+
+      applyColorsToCSS();
+
+    } catch { /* ignore */ }
+  }
+
+  // ----- Boot -----
+  loadLocal();
+  if (!(state.selectedEdgeIds instanceof Set)) state.selectedEdgeIds = new Set();
+  setMode('select');
+  render();
+})();
+</script>
+</body>
+</html>
