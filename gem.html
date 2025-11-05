@@ -106,6 +106,11 @@
   #edgeColorPad .chip.inactive { opacity: .35; pointer-events: none; }
   #edgeColorPad .actions { margin-top: 6px; text-align: right; }
 
+  /* Safari/iOS: prevent SVG selection and tap flash */
+  #canvas, #canvas * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #canvas { -webkit-tap-highlight-color: transparent; }
+
+
 </style>
 </head>
 <body>
@@ -255,8 +260,11 @@
       nodeId:null, edgeId:null, anchorIndex:null,
       offsetX:0, offsetY:0,
       startX:0, startY:0,
-      didDrag:false
+      didDrag:false,
+      pointerId:null,
+      captured:false
     },
+    lastTap: { t: 0, x: 0, y: 0 },
     nextNodeNum: 0,
     numCols: 3,
     colors: ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b'],
@@ -807,6 +815,28 @@
     render();
   });
 
+  // iPad Safari: synthesize dblclick with double-tap on empty canvas
+  svg.addEventListener('pointerup', evt => {
+    if (evt.pointerType !== 'touch') return;
+    if (evt.target.closest('.node, .edge, .handle')) return;
+
+    const now = performance.now();
+    const { x, y } = svgPoint(evt);
+    const dt = now - state.lastTap.t;
+    const dx = x - state.lastTap.x, dy = y - state.lastTap.y;
+
+    if (dt > 0 && dt < 350 && (dx*dx + dy*dy) < 625) { // <25px radius
+      const node = { id: crypto.randomUUID(), x, y, label: nextNodeLabel() };
+      state.nodes.push(node);
+      state.selectedNodeId = node.id;
+      state.lastTap = { t: 0, x: 0, y: 0 };
+      render();
+    } else {
+      state.lastTap = { t: now, x, y };
+    }
+  });
+
+
   function onNodeClick(evt) {
     if (state.drag.didDrag) { state.drag.didDrag = false; return; }
     const gid = evt.currentTarget.dataset.nodeId;
@@ -855,11 +885,30 @@
     svg.setPointerCapture(evt.pointerId);
   }
 
+  // function onNodePointerDown(evt) {
+  //   evt.preventDefault();
+  //   const gid = evt.currentTarget.dataset.nodeId;
+  //   const node = byId(gid);
+  //   const p = svgPoint(evt);
+  //   state.drag.active = true;
+  //   state.drag.kind = 'node';
+  //   state.drag.nodeId = gid;
+  //   state.drag.offsetX = node.x - p.x;
+  //   state.drag.offsetY = node.y - p.y;
+  //   state.drag.startX = p.x;
+  //   state.drag.startY = p.y;
+  //   state.drag.didDrag = false;
+  //   svg.setPointerCapture(evt.pointerId);
+  //   state.selectedNodeId = gid;
+  //   state.selectedEdgeIds.clear();
+  //   state.selectedEdgeId = null;
+  //   render();
+  // }
   function onNodePointerDown(evt) {
-    evt.preventDefault();
     const gid = evt.currentTarget.dataset.nodeId;
     const node = byId(gid);
     const p = svgPoint(evt);
+
     state.drag.active = true;
     state.drag.kind = 'node';
     state.drag.nodeId = gid;
@@ -868,23 +917,53 @@
     state.drag.startX = p.x;
     state.drag.startY = p.y;
     state.drag.didDrag = false;
-    svg.setPointerCapture(evt.pointerId);
+    state.drag.pointerId = evt.pointerId || null;
+    state.drag.captured = false;                      // capture later, after threshold
+
     state.selectedNodeId = gid;
-    state.selectedEdgeIds.clear();
-    state.selectedEdgeId = null;
+    if (state.selectedEdgeIds instanceof Set) state.selectedEdgeIds.clear();
+    // no preventDefault here; allow Safari to deliver the click
     render();
   }
 
-
+  // svg.addEventListener('pointermove', evt => {
+  //   if (!state.drag.active) return;
+  //   const p = svgPoint(evt);
+  //   if (state.drag.kind === 'node') {
+  //     const node = byId(state.drag.nodeId);
+  //     node.x = p.x + state.drag.offsetX;
+  //     node.y = p.y + state.drag.offsetY;
+  //     const dx = p.x - state.drag.startX, dy = p.y - state.drag.startY;
+  //     if (!state.drag.didDrag && (dx*dx + dy*dy) > 9) state.drag.didDrag = true; // >3px
+  //   } else if (state.drag.kind === 'anchor') {
+  //     const e = state.edges.find(x => x.id === state.drag.edgeId);
+  //     if (e) {
+  //       const idx = state.drag.anchorIndex;
+  //       e.anchors[idx].x = p.x + state.drag.offsetX;
+  //       e.anchors[idx].y = p.y + state.drag.offsetY;
+  //     }
+  //   }
+  //   render();
+  // });
   svg.addEventListener('pointermove', evt => {
     if (!state.drag.active) return;
     const p = svgPoint(evt);
+
     if (state.drag.kind === 'node') {
       const node = byId(state.drag.nodeId);
       node.x = p.x + state.drag.offsetX;
       node.y = p.y + state.drag.offsetY;
+
       const dx = p.x - state.drag.startX, dy = p.y - state.drag.startY;
-      if (!state.drag.didDrag && (dx*dx + dy*dy) > 9) state.drag.didDrag = true; // >3px
+      const moved = (dx*dx + dy*dy) > 9; // >3px
+      if (moved) {
+        state.drag.didDrag = true;
+        if (!state.drag.captured && state.drag.pointerId != null && svg.setPointerCapture) {
+          try { svg.setPointerCapture(state.drag.pointerId); state.drag.captured = true; } catch {}
+        }
+        // prevent scroll once we’re dragging on touch
+        if (evt.cancelable) evt.preventDefault();
+      }
     } else if (state.drag.kind === 'anchor') {
       const e = state.edges.find(x => x.id === state.drag.edgeId);
       if (e) {
@@ -893,11 +972,29 @@
         e.anchors[idx].y = p.y + state.drag.offsetY;
       }
     }
+
     render();
   });
 
+
+  // svg.addEventListener('pointerup', evt => {
+  //   if (!state.drag.active) return;
+  //   state.drag.active = false;
+  //   state.drag.kind = null;
+  //   state.drag.nodeId = null;
+  //   state.drag.edgeId = null;
+  //   state.drag.anchorIndex = null;
+  //   state.drag.startX = 0;
+  //   state.drag.startY = 0;
+  //   state.drag.didDrag = false;
+  //   svg.releasePointerCapture(evt.pointerId);
+  //   saveLocal();
+  // });
   svg.addEventListener('pointerup', evt => {
     if (!state.drag.active) return;
+    if (state.drag.captured && state.drag.pointerId != null && svg.releasePointerCapture) {
+      try { svg.releasePointerCapture(state.drag.pointerId); } catch {}
+    }
     state.drag.active = false;
     state.drag.kind = null;
     state.drag.nodeId = null;
@@ -906,7 +1003,8 @@
     state.drag.startX = 0;
     state.drag.startY = 0;
     state.drag.didDrag = false;
-    svg.releasePointerCapture(evt.pointerId);
+    state.drag.pointerId = null;
+    state.drag.captured = false;
     saveLocal();
   });
 
