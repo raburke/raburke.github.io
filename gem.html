@@ -93,9 +93,27 @@
   #layers .sw { width:12px; height:12px; border:1px solid #999; border-radius:2px; }
   #layers .label { font-size:12px; }
 
+  #edgeColorPad {
+    position: absolute; display: none; z-index: 1000;
+    background: #fff; border: 1px solid #ddd; border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.15); padding: 8px;
+  }
+  #edgeColorPad .row { display: grid; grid-template-columns: repeat(6, 28px); gap: 8px; }
+  #edgeColorPad .chip {
+    width: 28px; height: 28px; border-radius: 6px; border: 1px solid #999;
+    padding: 0; background: #0000; cursor: pointer;
+  }
+  #edgeColorPad .chip.inactive { opacity: .35; pointer-events: none; }
+  #edgeColorPad .actions { margin-top: 6px; text-align: right; }
+
 </style>
 </head>
 <body>
+  <div id="edgeColorPad" role="dialog" aria-label="Edge colour">
+    <div class="row" id="edgePadRow"></div>
+    <div class="actions"><button id="edgePadClose" type="button">Close</button></div>
+  </div>
+
   <div id="toolbar">
     <button id="mode-select" data-mode="select">Select/Drag</button>
     <button id="mode-add-edge" data-mode="add-edge">Add Edge</button>
@@ -288,6 +306,11 @@
   };
 
   const layersDiv = document.getElementById('layers');
+
+  const edgePad = document.getElementById('edgeColorPad');
+  const edgePadRow = document.getElementById('edgePadRow');
+  const edgePadClose = document.getElementById('edgePadClose');
+  let edgePadOpen = false;
 
 
   // ----- Helpers -----
@@ -539,127 +562,197 @@
     });
   }
 
+  function getSelectedEdgeIds() {
+    if (state.selectedEdgeIds instanceof Set) return new Set(state.selectedEdgeIds);
+    if (state.selectedEdgeId) return new Set([state.selectedEdgeId]);
+    return new Set();
+  }
+
+  function applyColorToSelected(digit) {
+    if (!(digit >= 0 && digit < state.numCols)) return; // honour active colours only
+    const selected = getSelectedEdgeIds();
+    if (selected.size === 0) return;
+    let changed = false;
+    for (const e of state.edges) {
+      if (selected.has(e.id)) { e.color = digit; changed = true; }
+    }
+    if (changed) { render(); saveLocal(); }
+  }
+
+  function showEdgePad(clientX, clientY) {
+    if (!edgePad || !edgePadRow) return;
+
+    // Build chips from current palette; disable inactive colours
+    edgePadRow.innerHTML = '';
+    for (let i = 0; i < 6; i++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip' + (i >= state.numCols ? ' inactive' : '');
+      btn.style.background = state.colors[i] || '#000000';
+      btn.dataset.i = String(i);
+      btn.addEventListener('click', () => { applyColorToSelected(i); hideEdgePad(); });
+      edgePadRow.appendChild(btn);
+    }
+
+    // Position within viewport with small offset
+    const padW = 8 + 6*28 + 5*8 + 8; // rough width
+    const padH = 8 + 28 + 6 + 30 + 8; // rough height incl. Close
+    const x = Math.min(window.innerWidth  - padW - 8, Math.max(8, clientX + 8));
+    const y = Math.min(window.innerHeight - padH - 8, Math.max(8, clientY + 8));
+    edgePad.style.left = x + 'px';
+    edgePad.style.top  = y + 'px';
+    edgePad.style.display = 'block';
+    edgePadOpen = true;
+  }
+
+  function hideEdgePad() {
+    if (!edgePadOpen) return;
+    edgePad.style.display = 'none';
+    edgePadOpen = false;
+  }
 
   // ----- Rendering -----
   function render() {
-  // ----- Edges (as B-spline paths + invisible hit stroke) -----
-  gEdges.innerHTML = '';
-  for (const e of state.edges) {
-    const s = byId(e.source), t = byId(e.target);
-    if (!s || !t) continue;
+    // ----- Edges (B-spline + invisible hit path) -----
+    gEdges.innerHTML = '';
+    for (const e of state.edges) {
+      const s = byId(e.source), t = byId(e.target);
+      if (!s || !t) continue;
 
-    const ctrl = [{ x: s.x, y: s.y }, ...(e.anchors || []), { x: t.x, y: t.y }];
-    const d = bsplinePathD(ctrl, 3, 12);
+      const ctrl = [{ x: s.x, y: s.y }, ...(e.anchors || []), { x: t.x, y: t.y }];
+      const d = bsplinePathD(ctrl, 3, 12);
 
-    const isSelected = (state.selectedEdgeIds instanceof Set)
-      ? state.selectedEdgeIds.has(e.id)
-      : (state.selectedEdgeId === e.id);
+      const isSelected = (state.selectedEdgeIds instanceof Set)
+        ? state.selectedEdgeIds.has(e.id)
+        : (state.selectedEdgeId === e.id); // legacy fallback
 
-    const onEdgeDown = (evt) => {
-      evt.stopPropagation();
-      if (!(state.selectedEdgeIds instanceof Set)) state.selectedEdgeIds = new Set();
+      const onEdgeDown = (evt) => {
+        if (evt.button === 2) return; // right-click handled by contextmenu
+        evt.stopPropagation();
+        if (!(state.selectedEdgeIds instanceof Set)) state.selectedEdgeIds = new Set();
 
-      if (evt.shiftKey) {
-        if (state.selectedEdgeIds.has(e.id)) state.selectedEdgeIds.delete(e.id);
-        else state.selectedEdgeIds.add(e.id);
+        if (evt.shiftKey) {
+          if (state.selectedEdgeIds.has(e.id)) state.selectedEdgeIds.delete(e.id);
+          else state.selectedEdgeIds.add(e.id);
+        } else {
+          state.selectedEdgeIds = new Set([e.id]);
+        }
+        state.selectedNodeId = null;
+
+        // Desktop modifier-click or mobile tap shows palette
+        const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+        const modifier = evt.ctrlKey || evt.metaKey || evt.altKey;
+        if (coarse || evt.pointerType === 'touch' || modifier) {
+          showEdgePad(evt.clientX, evt.clientY);
+        } else {
+          hideEdgePad();
+        }
+
+        render();
+      };
+
+      // visible edge
+      const vis = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      vis.setAttribute('class', `edge${isSelected ? ' selected' : ''}`);
+      vis.setAttribute('d', d);
+      vis.dataset.edgeId = e.id;
+
+      // colour stroke from palette
+      const ci = e.color;
+      if (Number.isInteger(ci) && ci >= 0 && ci < state.colors.length) {
+        vis.style.stroke = state.colors[ci];
       } else {
-        state.selectedEdgeIds = new Set([e.id]);
+        vis.style.stroke = ''; // fallback to CSS .edge
       }
-      state.selectedNodeId = null;
-      render();
-    };
 
-    // visible edge
-    const vis = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    vis.setAttribute('class', `edge${isSelected ? ' selected' : ''}`);
-    vis.setAttribute('d', d);
-    vis.dataset.edgeId = e.id;
+      // per-colour visibility
+      const hide = Number.isInteger(ci) && ci >= 0 && ci < state.colorVisibility.length && !state.colorVisibility[ci];
+      vis.style.display = hide ? 'none' : '';
 
-    // colour stroke from palette
-    const ci = e.color;
-    if (Number.isInteger(ci) && ci >= 0 && ci < state.colors.length) {
-      vis.style.stroke = state.colors[ci];
-    } else {
-      vis.style.stroke = ''; // fallback to CSS
+      vis.addEventListener('pointerdown', onEdgeDown);
+      gEdges.appendChild(vis);
+
+      // fat invisible hit path (improves selection tolerance)
+      const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      hit.setAttribute('class', 'edge-hit');
+      hit.setAttribute('d', d);
+      hit.dataset.edgeId = e.id;
+      hit.style.display = hide ? 'none' : '';
+      hit.addEventListener('pointerdown', onEdgeDown);
+      gEdges.appendChild(hit);
+
+      // right-click to open palette (attach after both paths exist)
+      const onEdgeContext = (ev) => {
+        ev.preventDefault();
+        if (!(state.selectedEdgeIds instanceof Set)) state.selectedEdgeIds = new Set();
+        state.selectedEdgeIds = new Set([e.id]); // context-click selects only this edge
+        state.selectedNodeId = null;
+        showEdgePad(ev.clientX, ev.clientY);
+        render();
+      };
+      vis.addEventListener('contextmenu', onEdgeContext);
+      hit.addEventListener('contextmenu', onEdgeContext);
     }
 
-    // per-colour visibility
-    const hide = Number.isInteger(ci) && ci >= 0 && ci < state.colorVisibility.length && !state.colorVisibility[ci];
-    vis.style.display = hide ? 'none' : '';
-
-    vis.addEventListener('pointerdown', onEdgeDown);
-    gEdges.appendChild(vis);
-
-    // invisible fat hit path (for easier selection)
-    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    hit.setAttribute('class', 'edge-hit');
-    hit.setAttribute('d', d);
-    hit.dataset.edgeId = e.id;
-    hit.style.display = hide ? 'none' : '';
-    hit.addEventListener('pointerdown', onEdgeDown);
-    gEdges.appendChild(hit);
-  }
-
-  // ----- Anchor handles (only if exactly one edge selected) -----
-  gHandles.innerHTML = '';
-  let singleEdgeId = null;
-  if (state.selectedEdgeIds instanceof Set) {
-    if (state.selectedEdgeIds.size === 1) {
-      singleEdgeId = state.selectedEdgeIds.values().next().value;
+    // ----- Anchor handles (only if exactly one edge selected) -----
+    gHandles.innerHTML = '';
+    let singleEdgeId = null;
+    if (state.selectedEdgeIds instanceof Set) {
+      if (state.selectedEdgeIds.size === 1) singleEdgeId = state.selectedEdgeIds.values().next().value;
+    } else if (state.selectedEdgeId) {
+      singleEdgeId = state.selectedEdgeId; // legacy fallback
     }
-  } else if (state.selectedEdgeId) {
-    singleEdgeId = state.selectedEdgeId; // legacy fallback
-  }
-  if (singleEdgeId) {
-    const e = state.edges.find(x => x.id === singleEdgeId);
-    if (e && e.anchors && e.anchors.length) {
-      e.anchors.forEach((pt, i) => {
-        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        g.setAttribute('class', 'handle');
-        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        c.setAttribute('cx', pt.x);
-        c.setAttribute('cy', pt.y);
-        c.setAttribute('r', 6);
-        c.dataset.edgeId = e.id;
-        c.dataset.anchorIndex = String(i);
-        c.addEventListener('pointerdown', onHandlePointerDown);
-        g.appendChild(c);
-        gHandles.appendChild(g);
-      });
+    if (singleEdgeId) {
+      const se = state.edges.find(x => x.id === singleEdgeId);
+      if (se && se.anchors && se.anchors.length) {
+        se.anchors.forEach((pt, i) => {
+          const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          g.setAttribute('class', 'handle');
+          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          c.setAttribute('cx', pt.x);
+          c.setAttribute('cy', pt.y);
+          c.setAttribute('r', 6);
+          c.dataset.edgeId = se.id;
+          c.dataset.anchorIndex = String(i);
+          c.addEventListener('pointerdown', onHandlePointerDown);
+          g.appendChild(c);
+          gHandles.appendChild(g);
+        });
+      }
     }
+
+    // ----- Nodes -----
+    gNodes.innerHTML = '';
+    for (const n of state.nodes) {
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', `node${n.id === state.selectedNodeId ? ' selected' : ''}`);
+      g.setAttribute('transform', `translate(${n.x},${n.y})`);
+      g.dataset.nodeId = n.id;
+
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('r', RADIUS);
+
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('dominant-baseline', 'central');
+      label.setAttribute('font-size', '13');
+      label.textContent = n.label;
+
+      g.appendChild(circle);
+      g.appendChild(label);
+
+      g.addEventListener('pointerdown', onNodePointerDown);
+      g.addEventListener('click', onNodeClick);
+      gNodes.appendChild(g);
+    }
+
+    // ----- Side UI + persistence -----
+    updatePanel();
+    renderColorUI();
+    renderLayersUI?.();
+    saveLocal();
   }
 
-  // ----- Nodes -----
-  gNodes.innerHTML = '';
-  for (const n of state.nodes) {
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('class', `node${n.id === state.selectedNodeId ? ' selected' : ''}`);
-    g.setAttribute('transform', `translate(${n.x},${n.y})`);
-    g.dataset.nodeId = n.id;
-
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('r', RADIUS);
-
-    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('text-anchor', 'middle');
-    label.setAttribute('dominant-baseline', 'central');
-    label.setAttribute('font-size', '13');
-    label.textContent = n.label;
-
-    g.appendChild(circle);
-    g.appendChild(label);
-
-    g.addEventListener('pointerdown', onNodePointerDown);
-    g.addEventListener('click', onNodeClick);
-    gNodes.appendChild(g);
-  }
-
-  // ----- Side UI + persistence -----
-  updatePanel();
-  renderColorUI();
-  renderLayersUI?.();
-  saveLocal();
-}
 
 
   function lineBetweenNodes(a, b, r) {
@@ -1065,6 +1158,14 @@
     if (typeof colorDialog.showModal === 'function') colorDialog.showModal();
     else colorDialog.setAttribute('open','');
   }
+
+
+  edgePadClose?.addEventListener('click', hideEdgePad);
+  document.addEventListener('pointerdown', (ev) => {
+    if (!edgePadOpen) return;
+    if (!edgePad.contains(ev.target)) hideEdgePad();
+  });
+  window.addEventListener('resize', hideEdgePad);
 
 
   // ----- Persistence -----
