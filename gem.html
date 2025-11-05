@@ -265,6 +265,7 @@
       captured:false
     },
     lastTap: { t: 0, x: 0, y: 0 },
+    edgeTap: { pending:false, x:0, y:0, pointerId:null },
     nextNodeNum: 0,
     numCols: 3,
     colors: ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b'],
@@ -750,6 +751,7 @@
       g.appendChild(label);
 
       g.addEventListener('pointerdown', onNodePointerDown);
+      g.addEventListener('pointerup', onNodePointerUpEdge);
       g.addEventListener('click', onNodeClick);
       gNodes.appendChild(g);
     }
@@ -818,6 +820,7 @@
   // iPad Safari: synthesize dblclick with double-tap on empty canvas
   svg.addEventListener('pointerup', evt => {
     if (evt.pointerType !== 'touch') return;
+    if (state.mode === 'add-edge') return;
     if (evt.target.closest('.node, .edge, .handle')) return;
 
     const now = performance.now();
@@ -1010,14 +1013,95 @@
 
 
   // While adding an edge: click on empty canvas to add anchor points
-  svg.addEventListener('click', evt => {
+  // svg.addEventListener('click', evt => {
+  //   if (state.mode !== 'add-edge') return;
+  //   if (!state.tempEdgeSourceId) return;
+  //   if (evt.target.closest('.node, .edge, .handle')) return;
+  //   const {x, y} = svgPoint(evt);
+  //   state.pendingAnchors.push({x, y});
+  //   render();
+  // });
+  // Start an anchor tap on empty canvas
+  svg.addEventListener('pointerdown', evt => {
     if (state.mode !== 'add-edge') return;
     if (!state.tempEdgeSourceId) return;
+    if (evt.button !== 0 && evt.pointerType !== 'touch') return; // left click or touch
     if (evt.target.closest('.node, .edge, .handle')) return;
-    const {x, y} = svgPoint(evt);
-    state.pendingAnchors.push({x, y});
-    render();
+
+    const p = svgPoint(evt);
+    state.edgeTap.pending   = true;
+    state.edgeTap.x         = p.x;
+    state.edgeTap.y         = p.y;
+    state.edgeTap.pointerId = evt.pointerId ?? null;
+
+    // prevent Safari focus/selection of <svg>
+    if (evt.cancelable) evt.preventDefault();
   });
+
+  function onNodePointerUpEdge(evt) {
+    if (state.mode !== 'add-edge') return;
+    if (state.drag.didDrag) return; // ignore drags
+    const gid = evt.currentTarget.dataset.nodeId;
+
+    // pick source or finish edge
+    if (!state.tempEdgeSourceId) {
+      state.tempEdgeSourceId = gid;
+      state.selectedNodeId = gid;
+      render();
+      if (evt.cancelable) evt.preventDefault(); // suppress legacy click
+      return;
+    }
+
+    if (state.tempEdgeSourceId === gid) {
+      // no loops; reset step
+      state.tempEdgeSourceId = null;
+      state.pendingAnchors = [];
+      state.selectedNodeId = null;
+      render();
+      if (evt.cancelable) evt.preventDefault();
+      return;
+    }
+
+    // create edge
+    const e = {
+      id: crypto.randomUUID(),
+      source: state.tempEdgeSourceId,
+      target: gid,
+      anchors: state.pendingAnchors.slice(),
+      color: null
+    };
+    state.edges.push(e);
+    state.selectedEdgeIds = new Set([e.id]);
+    state.pendingAnchors = [];
+    state.tempEdgeSourceId = null;
+    state.selectedNodeId = null;
+    render();
+    saveLocal();
+    if (evt.cancelable) evt.preventDefault(); // cancel the click so we don't double-fire
+  }
+
+
+  // Finish an anchor tap if it didn’t move much
+  svg.addEventListener('pointerup', evt => {
+    if (state.mode !== 'add-edge') return;
+    if (!state.tempEdgeSourceId) return;
+    if (!state.edgeTap.pending) return;
+    if (evt.target.closest('.node, .edge, .handle')) { state.edgeTap.pending=false; return; }
+
+    const p = svgPoint(evt);
+    const dx = p.x - state.edgeTap.x, dy = p.y - state.edgeTap.y;
+    const moved = (dx*dx + dy*dy) > 100; // ~10px
+
+    if (!moved) {
+      state.pendingAnchors.push({ x: state.edgeTap.x, y: state.edgeTap.y });
+      render();
+    }
+    state.edgeTap.pending = false;
+
+    // avoid default focus/selection flicker on Safari
+    if (evt.cancelable) evt.preventDefault();
+  });
+
 
 
   // Keyboard listener
