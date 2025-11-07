@@ -12,7 +12,12 @@
     border-bottom: 1px solid #ddd; background: #fafafa;
   }
   #toolbar button, #toolbar select, #toolbar input[type="checkbox"] { font: inherit; padding: .4rem .6rem; }
-  #wrap { display: grid; grid-template-columns: 1fr 320px; height: 100%; }
+  #wrap { 
+    display: grid; 
+    grid-template-columns: 
+    1fr clamp(100px, 15vw, 300px); 
+    height: 100%; 
+  }
   #canvas { width: 100%; height: 100%; touch-action: none; background: #fff; }
   #panel { border-left: 1px solid #eee; padding: .75rem; overflow: auto; }
   #panel h3 { margin: .5rem 0; }
@@ -52,7 +57,7 @@
   .color-controls { display: grid; grid-auto-rows: auto; gap: 4px; align-items: start; margin-left: .5rem; }
   .color-controls label { font-size: 12px; display: grid; grid-auto-flow: column; align-items: center; gap: .35rem; }
   #numCols { width: 3.5rem; }
-  .swatch { display: grid; grid-template-columns: repeat(6, 20px); grid-template-rows: 20px auto; column-gap: 10px; row-gap: 4px; justify-content: center; }
+  .swatch { display: grid; grid-template-columns: repeat(6, 20px); grid-template-rows: 20px auto; column-gap: 10px; row-gap: 4px; justify-content: start; }
   .swatch .panel { width: 20px; height: 20px; border: 1px solid #999; border-radius: 3px; }
   .swatch .panel.disabled { display: none; }
   .swatch .label.disabled { display: none; }
@@ -106,9 +111,63 @@
   #edgeColorPad .chip.inactive { opacity: .35; pointer-events: none; }
   #edgeColorPad .actions { margin-top: 6px; text-align: right; }
 
-  /* Safari/iOS: prevent SVG selection and tap flash */
+  /* Safari/iOS: prevent SVG selecting when tapping */
   #canvas, #canvas * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   #canvas { -webkit-tap-highlight-color: transparent; }
+
+  /* Snap-to-grid controls */
+  .grid-controls{
+    display:grid;
+    grid-template-columns:auto 1fr;
+    grid-auto-rows:auto;
+    align-items:center;
+    column-gap:.5rem; row-gap:.25rem;
+    margin-left:.5rem;
+  }
+
+  /* Always occupy layout; hide visually when off */
+  #gridFields{
+    grid-column:1 / -1;
+    grid-row:2;
+    display:inline-flex;            /* fixed layout width/height */
+    gap:.25rem; align-items:center;
+    visibility:hidden;              /* JS flips to visible */
+    pointer-events:none;            /* not focusable when hidden */
+  }
+
+  #gridFields input { width: 3.5rem; }
+
+  /* Grid drawing */
+  #grid rect { pointer-events: none; }
+
+  /* Toolbar buttons layout: 2 rows × 3 cols */
+  .btn-grid{
+    display:grid;
+    grid-template-columns: repeat(4, max-content);
+    grid-auto-rows: auto;
+    gap:.5rem;
+    margin-right:.75rem; /* space before colour controls */
+    align-items:center;
+  }
+
+  /* Alternating backgrounds for layer rows */
+  :root {
+    --layer-even: #f8f9fb; /* light */
+    --layer-odd:  #f2f4f7; /* slightly darker */
+  }
+
+  #layers .layer {
+    padding: 3px 4px;
+/*    border-radius: 6px;*/
+    background: var(--layer-even);
+    border: 1px solid #e6e8eb;
+  }
+
+  #layers .layer:nth-child(odd) {
+    background: var(--layer-odd);
+  }
+
+  #layers .sw { box-shadow: inset 0 0 0 1px rgba(0,0,0,.05); }
 
 
 </style>
@@ -120,17 +179,23 @@
   </div>
 
   <div id="toolbar">
-    <button id="mode-select" data-mode="select">Select/Drag</button>
-    <button id="mode-add-edge" data-mode="add-edge">Add Edge</button>
-    <button id="delete">Delete</button>
-    <button id="clear">Clear</button>
-    <button id="export">Export JSON</button>
-    <input id="importFile" type="file" accept="application/json" style="display:none" />
-    <button id="importBtn">Import JSON</button>
+    <div class="btn-grid">
+      <!-- Row 1 -->
+      <button id="mode-select" data-mode="select">Select/Drag</button>
+      <button id="mode-add-edge" data-mode="add-edge">Add Edge</button>
+      <input id="importFile" type="file" accept="application/json" style="display:none" />
+      <button id="importBtn">Import JSON</button>
+      <button id="exportSvg">Export SVG</button>
+      <!-- Row 2 -->
+      <button id="delete">Delete</button>
+      <button id="clear">Clear</button>
+      <button id="export">Export JSON</button>
+    </div>
+
 
     <div class="color-controls">
       <label for="numCols">
-        Number of Colours (<i>dim</i>+ 1)
+        Number of Colours (<i>dim</i>+ 1):
         <select id="numCols">
           <option value="1">1</option>
           <option value="2">2</option>
@@ -160,8 +225,17 @@
       </div>
     </div>
 
+    <label class="grid-controls">
+      <input id="snapGrid" type="checkbox" />
+      Snap to Grid
+      <span id="gridFields">
+        <input id="gridX" type="number" min="2" step="1" value="20" aria-label="Grid X" />
+        ×
+        <input id="gridY" type="number" min="2" step="1" value="20" aria-label="Grid Y" />
+      </span>
+    </label>
 
-    <span class="hint" style="margin-left:auto">Double-click empty canvas to add a node. In “Add Edge”, click source then target.<br />Click colour boxes to change colour. Press keys 0 to <i>dim</i> on edges to colour edges.<br />Shift click to select and colour multiple edges.</span>
+    <span class="hint" style="margin-left:auto">Double-click empty canvas to add a node. In “Add Edge”, click source then target.<br />Click colour boxes to change colour.<br />Press keys 0 to <i>dim</i> on edges to colour edges, or right click to open colour palette.<br />Shift click to select and colour multiple edges.</span>
 
   </div>
 
@@ -169,6 +243,7 @@
     <svg id="canvas" tabindex="0" aria-label="graph editor">
       <defs>
       </defs>
+      <g id="grid"></g>
       <g id="edges"></g>
       <g id="nodes"></g>
       <g id="handles"></g>
@@ -184,10 +259,11 @@
 
 
       <h3>Algorithms</h3>
-<!--       <div>
-        <button id="cyclesBtn" title="Detect cycles">Detect Cycles</button>
+      <div>
+        <!-- <button id="cyclesBtn" title="Detect cycles">Detect Cycles</button> -->
+        <button id="countColorCyclesBtn" title="{a,b}-coloured cycle counts">{a,b}-Cycle Counts</button>
         <div id="algoOut" style="margin-top:.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap"></div>
-      </div> -->
+      </div>
     </aside>
   </div>
   <dialog id="printDialog">
@@ -271,6 +347,7 @@
     colors: ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b'],
     selectedEdgeIds: new Set(),
     colorVisibility: [true, true, true, true, true, true],
+    snap: { on:false, gx:20, gy:20 },
   };
 
 
@@ -312,6 +389,8 @@
     importBtn: document.getElementById('importBtn'),
     importFile: document.getElementById('importFile'),
     cycles: document.getElementById('cyclesBtn'),
+    exportSvg: document.getElementById('exportSvg'),
+    countColorCycles: document.getElementById('countColorCyclesBtn'),
   };
 
   const layersDiv = document.getElementById('layers');
@@ -320,6 +399,13 @@
   const edgePadRow = document.getElementById('edgePadRow');
   const edgePadClose = document.getElementById('edgePadClose');
   let edgePadOpen = false;
+
+
+  const gGrid = document.getElementById('grid');
+  const snapChk = document.getElementById('snapGrid');
+  const gridFields = document.getElementById('gridFields');
+  const gridXInput = document.getElementById('gridX');
+  const gridYInput = document.getElementById('gridY');
 
 
   // ----- Helpers -----
@@ -621,7 +707,75 @@
   }
 
   // ----- Rendering -----
+  function clampInt(v, minVal) {
+    v = Math.round(+v || 0);
+    return Math.max(minVal, v);
+  }
+
+  function snapPoint(x, y) {
+    if (!state.snap.on) return { x, y };
+    const gx = clampInt(state.snap.gx, 2);
+    const gy = clampInt(state.snap.gy, 2);
+    return {
+      x: Math.round(x / gx) * gx,
+      y: Math.round(y / gy) * gy
+    };
+  }
+
+  function drawGrid() {
+    if (!gGrid) return;
+    gGrid.innerHTML = '';
+    if (!state.snap.on) return;
+
+    const w = svg.clientWidth || svg.getBoundingClientRect().width || 0;
+    const h = svg.clientHeight || svg.getBoundingClientRect().height || 0;
+    const gx = clampInt(state.snap.gx, 2);
+    const gy = clampInt(state.snap.gy, 2);
+
+    // pattern in <defs>
+    const defs = svg.querySelector('defs');
+    let patt = document.getElementById('gridPatt');
+    if (!patt) {
+      patt = document.createElementNS('http://www.w3.org/2000/svg', 'pattern');
+      patt.setAttribute('id', 'gridPatt');
+      patt.setAttribute('patternUnits', 'userSpaceOnUse');
+      defs.appendChild(patt);
+    }
+    patt.setAttribute('width', gx);
+    patt.setAttribute('height', gy);
+    patt.innerHTML = ''; // rebuild
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M ${gx} 0 L 0 0 0 ${gy}`);
+    path.setAttribute('fill', 'none');                  // <-- prevent black triangles
+    path.setAttribute('stroke', '#e6e6e6');
+    path.setAttribute('stroke-width', '1');
+    path.setAttribute('shape-rendering', 'crispEdges'); // optional, sharper lines
+    patt.appendChild(path);
+
+    // cover the viewport with the pattern
+    const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    r.setAttribute('x', '0');
+    r.setAttribute('y', '0');
+    r.setAttribute('width', String(w));
+    r.setAttribute('height', String(h));
+    r.setAttribute('fill', 'url(#gridPatt)');
+    gGrid.appendChild(r);
+  }
+
+  function renderSnapUI() {
+    if (!snapChk) return;
+    snapChk.checked = !!state.snap.on;
+    if (gridXInput) gridXInput.value = String(clampInt(state.snap.gx, 2));
+    if (gridYInput) gridYInput.value = String(clampInt(state.snap.gy, 2));
+    if (gridFields) {
+      gridFields.style.visibility = state.snap.on ? 'visible' : 'hidden';
+      gridFields.style.pointerEvents = state.snap.on ? 'auto' : 'none';
+    }
+
+  }
+
   function render() {
+    drawGrid();
     // ----- Edges (B-spline + invisible hit path) -----
     gEdges.innerHTML = '';
     for (const e of state.edges) {
@@ -759,11 +913,11 @@
     // ----- Side UI + persistence -----
     updatePanel();
     renderColorUI();
+    syncAlgoButtons();
     renderLayersUI?.();
+    renderSnapUI();
     saveLocal();
   }
-
-
 
   function lineBetweenNodes(a, b, r) {
     const dx = b.x - a.x, dy = b.y - a.y;
@@ -782,6 +936,116 @@
 
 
   // ----- Algorithms -----
+  function syncAlgoButtons(){
+    const btn = document.getElementById('countColorCyclesBtn');
+    if (btn) btn.disabled = state.numCols < 2;
+  }
+
+
+  function countAllColorPairCycles() {
+    const maxC = Math.max(0, Math.min(6, state.numCols));
+    if (maxC < 2) return 'No colour pairs (numCols < 2).';
+    const lines = [];
+    for (let a = 0; a < maxC; a++) {
+      for (let b = a + 1; b < maxC; b++) {
+        const k = countColorPairCycles(a, b);
+        lines.push(`{${a},${b}}: ${k}`);
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function countColorPairCycles(a, b) {
+    // Build adjacency restricted to colours {a,b} and collect parallel edges per unordered pair
+    const ids = state.nodes.map(n => n.id);
+    const idToNum = new Map(state.nodes.map(n => [n.id, Number(n.label)])); // labels are numeric
+    const adj = new Map(ids.map(id => [id, []]));
+    const pairKey = (x, y) => (x < y) ? (x + '|' + y) : (y + '|' + x);
+    const pairCounts = new Map(); // key -> {a: count, b: count}
+
+    for (const e of state.edges) {
+      if (e.source === e.target) continue;                // no loops
+      if (!Number.isInteger(e.color)) continue;
+      if (!(e.color === a || e.color === b)) continue;    // only {a,b}
+
+      // adjacency for DFS cycles (length ≥3)
+      adj.get(e.source).push({ to: e.target, edgeId: e.id });
+      adj.get(e.target).push({ to: e.source, edgeId: e.id });
+
+      // counts for 2-cycles (bigons)
+      const key = pairKey(e.source, e.target);
+      let obj = pairCounts.get(key);
+      if (!obj) obj = { a: 0, b: 0 };
+      if (e.color === a) obj.a++; else obj.b++;
+      pairCounts.set(key, obj);
+    }
+
+    // 1) Bigons: each (a-edge) × (b-edge) between the same unordered pair forms a distinct 2-cycle
+    let count = 0;
+    for (const { a: ca, b: cb } of pairCounts.values()) count += ca * cb;
+
+    // 2) Simple cycles of length ≥3 with edges in {a,b} (avoid duplicates by canonical edge-ID key)
+    const seen = new Set();
+    function canonKey(edgeIds) {
+      if (edgeIds.length === 0) return '';
+      const s = edgeIds.map(String);
+      const rots = [];
+      for (let i = 0; i < s.length; i++) rots.push(s.slice(i).concat(s.slice(0, i)));
+      const rs = s.slice().reverse();
+      for (let i = 0; i < rs.length; i++) rots.push(rs.slice(i).concat(rs.slice(0, i)));
+      let best = rots[0].join(',');
+      for (let i = 1; i < rots.length; i++) {
+        const key = rots[i].join(',');
+        if (key < best) best = key;
+      }
+      return best;
+    }
+
+    // order starts by numeric label so each cycle is counted once (start is minimal vertex)
+    const ordered = state.nodes.slice().sort((u, v) => Number(u.label) - Number(v.label));
+
+    for (const start of ordered) {
+      const s = start.id;
+      const sNum = idToNum.get(s);
+      const visited = new Set([s]);
+      const usedEdges = new Set();
+      const pathEdges = [];
+
+      function dfs(u) {
+        for (const { to: v, edgeId } of adj.get(u) || []) {
+          if (usedEdges.has(edgeId)) continue;
+
+          if (v === s) {
+            // close a cycle only if length >= 3; 2-cycles were counted above as bigons
+            if (pathEdges.length >= 2) {
+              const key = canonKey(pathEdges.concat(edgeId));
+              if (!seen.has(key)) { seen.add(key); count++; }
+            }
+            continue;
+          }
+
+          const vNum = idToNum.get(v);
+          if (vNum < sNum) continue;        // enforce minimal start node
+          if (visited.has(v)) continue;     // simple cycles only
+
+          visited.add(v);
+          usedEdges.add(edgeId);
+          pathEdges.push(edgeId);
+
+          dfs(v);
+
+          pathEdges.pop();
+          usedEdges.delete(edgeId);
+          visited.delete(v);
+        }
+      }
+
+      dfs(s);
+    }
+
+    return count;
+  }
+
 
   function detectCycles() {
     const ids = state.nodes.map(n=>n.id);
@@ -810,8 +1074,9 @@
   svg.addEventListener('dblclick', evt => {
     // Ignore if dbl-click on an existing node or edge
     if (evt.target.closest('.node, .edge')) return;
-    const {x, y} = svgPoint(evt);
-    const node = { id: crypto.randomUUID(), x, y, label: nextNodeLabel() };
+    const p = svgPoint(evt);
+    const s = snapPoint(p.x, p.y);
+    const node = { id: crypto.randomUUID(), x: s.x, y: s.y, label: nextNodeLabel() };
     state.nodes.push(node);
     state.selectedNodeId = node.id;
     render();
@@ -824,12 +1089,14 @@
     if (evt.target.closest('.node, .edge, .handle')) return;
 
     const now = performance.now();
-    const { x, y } = svgPoint(evt);
+    const p = svgPoint(evt);
+    const s = snapPoint(p.x, p.y);
+
     const dt = now - state.lastTap.t;
     const dx = x - state.lastTap.x, dy = y - state.lastTap.y;
 
     if (dt > 0 && dt < 350 && (dx*dx + dy*dy) < 625) { // <25px radius
-      const node = { id: crypto.randomUUID(), x, y, label: nextNodeLabel() };
+      const node = { id: crypto.randomUUID(), x: s.x, y: s.y, label: nextNodeLabel() };
       state.nodes.push(node);
       state.selectedNodeId = node.id;
       state.lastTap = { t: 0, x: 0, y: 0 };
@@ -929,6 +1196,25 @@
     render();
   }
 
+  snapChk.addEventListener('change', () => {
+    state.snap.on = !!snapChk.checked;
+    renderSnapUI();
+    render();
+    saveLocal();
+  });
+
+  gridXInput.addEventListener('change', () => {
+    state.snap.gx = clampInt(gridXInput.value, 2);
+    render();
+    saveLocal();
+  });
+  gridYInput.addEventListener('change', () => {
+    state.snap.gy = clampInt(gridYInput.value, 2);
+    render();
+    saveLocal();
+  });
+
+
   // svg.addEventListener('pointermove', evt => {
   //   if (!state.drag.active) return;
   //   const p = svgPoint(evt);
@@ -954,8 +1240,11 @@
 
     if (state.drag.kind === 'node') {
       const node = byId(state.drag.nodeId);
-      node.x = p.x + state.drag.offsetX;
-      node.y = p.y + state.drag.offsetY;
+      let nx = p.x + state.drag.offsetX;
+      let ny = p.y + state.drag.offsetY;
+      if (state.snap.on) { const s = snapPoint(nx, ny); nx = s.x; ny = s.y; }
+      node.x = nx; node.y = ny;
+
 
       const dx = p.x - state.drag.startX, dy = p.y - state.drag.startY;
       const moved = (dx*dx + dy*dy) > 9; // >3px
@@ -971,8 +1260,11 @@
       const e = state.edges.find(x => x.id === state.drag.edgeId);
       if (e) {
         const idx = state.drag.anchorIndex;
-        e.anchors[idx].x = p.x + state.drag.offsetX;
-        e.anchors[idx].y = p.y + state.drag.offsetY;
+        let ax = p.x + state.drag.offsetX;
+        let ay = p.y + state.drag.offsetY;
+        if (state.snap.on) { const s = snapPoint(ax, ay); ax = s.x; ay = s.y; }
+        e.anchors[idx].x = ax; e.anchors[idx].y = ay;
+
       }
     }
 
@@ -1029,9 +1321,11 @@
     if (evt.target.closest('.node, .edge, .handle')) return;
 
     const p = svgPoint(evt);
+    const s = snapPoint(p.x, p.y);
     state.edgeTap.pending   = true;
-    state.edgeTap.x         = p.x;
-    state.edgeTap.y         = p.y;
+    state.edgeTap.x         = s.x;
+    state.edgeTap.y         = s.y;
+
     state.edgeTap.pointerId = evt.pointerId ?? null;
 
     // prevent Safari focus/selection of <svg>
@@ -1182,6 +1476,86 @@
     });
   }
 
+  if (btns.countColorCycles && algoOut) {
+    btns.countColorCycles.addEventListener('click', () => {
+      algoOut.textContent = countAllColorPairCycles();
+    });
+  }
+
+  btns.exportSvg.addEventListener('click', exportSVG);
+
+
+  function exportSVG() {
+    // clone the live SVG
+    const clone = svg.cloneNode(true);
+
+    // size + namespaces
+    const rect = svg.getBoundingClientRect();
+    const W = Math.round(rect.width), H = Math.round(rect.height);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    clone.setAttribute('width', String(W));
+    clone.setAttribute('height', String(H));
+    if (!clone.hasAttribute('viewBox')) clone.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    clone.removeAttribute('tabindex');
+    clone.removeAttribute('aria-label');
+
+    // remove editor-only visuals
+    clone.querySelectorAll('.edge-hit, .handle').forEach(n => n.remove());
+
+    // remove grid layer and its pattern
+    clone.querySelector('#grid')?.remove();
+    clone.querySelector('#gridPatt')?.remove();
+
+    // inline strokes on edges so they survive outside-page CSS
+    const srcEdges = svg.querySelectorAll('#edges path:not(.edge-hit)');
+    const dstEdges = clone.querySelectorAll('#edges path:not(.edge-hit)');
+    srcEdges.forEach((src, i) => {
+      const dst = dstEdges[i];
+      if (!dst) return;
+      const cs = getComputedStyle(src);
+      dst.setAttribute('fill', 'none');
+      dst.setAttribute('stroke', cs.stroke || '#666');
+      dst.setAttribute('stroke-width', cs.strokeWidth || '1.5');
+      dst.setAttribute('stroke-linecap', cs.strokeLinecap || 'butt');
+      dst.setAttribute('stroke-linejoin', cs.strokeLinejoin || 'miter');
+    });
+
+    // inline node circle styles
+    const srcCircles = svg.querySelectorAll('#nodes circle');
+    const dstCircles = clone.querySelectorAll('#nodes circle');
+    srcCircles.forEach((src, i) => {
+      const dst = dstCircles[i];
+      if (!dst) return;
+      const cs = getComputedStyle(src);
+      dst.setAttribute('fill', cs.fill || '#fff');
+      dst.setAttribute('stroke', cs.stroke || '#222');
+      dst.setAttribute('stroke-width', cs.strokeWidth || '1.25');
+    });
+
+    // ensure text has a fill color
+    const srcTexts = svg.querySelectorAll('#nodes text');
+    const dstTexts = clone.querySelectorAll('#nodes text');
+    srcTexts.forEach((src, i) => {
+      const dst = dstTexts[i];
+      if (!dst) return;
+      const cs = getComputedStyle(src);
+      dst.setAttribute('fill', cs.fill || '#000');
+      dst.setAttribute('font-size', src.getAttribute('font-size') || '13');
+      dst.setAttribute('text-anchor', 'middle');
+      dst.setAttribute('dominant-baseline', 'central');
+    });
+
+    // serialize and download
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n` + new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'graph.svg'; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+
 
   function doDelete() {
     if (state.selectedNodeId) {
@@ -1248,6 +1622,7 @@
   numColsSel.addEventListener('change', () => {
     state.numCols = Math.max(1, Math.min(6, (+numColsSel.value || 1)));
     renderColorUI();
+    syncAlgoButtons();
     saveLocal();
   });
 
@@ -1258,6 +1633,21 @@
     if (!(i >= 0 && i < 6)) return;
     openColorDialog(i);
   });
+
+  document.getElementById('panel').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('#countColorCyclesBtn');
+    if (!btn) return;
+    if (!algoOut) return;
+    try {
+      const out = (typeof countAllColorPairCycles === 'function')
+        ? countAllColorPairCycles()
+        : 'countAllColorPairCycles() is not defined';
+      algoOut.textContent = out;
+    } catch (err) {
+      algoOut.textContent = 'Error: ' + (err && err.message || String(err));
+    }
+  });
+
 
   function wireColorDialogIfNeeded(){
     if (colorDialogWired) return;
@@ -1359,7 +1749,8 @@
       nextNodeNum: state.nextNodeNum,
       numCols: state.numCols,
       colors: state.colors,
-      colorVisibility: state.colorVisibility
+      colorVisibility: state.colorVisibility,
+      snap: state.snap
     };
 
     localStorage.setItem(LS_KEY, JSON.stringify(payload));
@@ -1391,6 +1782,14 @@
         : [true, true, true, true, true, true];
 
       applyColorsToCSS();
+
+      const snapObj = obj.snap || {};
+      state.snap = {
+        on: !!snapObj.on,
+        gx: clampInt(snapObj.gx ?? 20, 2),
+        gy: clampInt(snapObj.gy ?? 20, 2)
+      };
+
 
     } catch { /* ignore */ }
   }
